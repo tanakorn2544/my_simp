@@ -53,24 +53,30 @@ def register_keymaps():
     except:
         return
     
+    print("[WPT] Registering keymaps:")
+    print(f"[WPT]   panel_shortcut: {preferences.panel_shortcut}")
+    print(f"[WPT]   toggle_bones_shortcut: {preferences.toggle_bones_shortcut}")
+    print(f"[WPT]   pie_menu_shortcut: {preferences.pie_menu_shortcut}")
+    print(f"[WPT]   gradient_toggle_shortcut: {preferences.gradient_toggle_shortcut}")
+    
     # Main panel shortcut - register in Window context for global access
     try:
-        km_window = kc.keymaps.new(name='Window', space_type='EMPTY')
-        kmi = km_window.keymap_items.new('wm.call_panel', preferences.panel_shortcut, 'PRESS')
-        kmi.properties.name = 'WPT_PT_main_panel'
-        kmi.properties.keep_open = True
+        km_window = kc.keymaps.get('Window') or kc.keymaps.new(name='Window', space_type='EMPTY')
+        kmi = km_window.keymap_items.new('wpt.toggle_main_panel', preferences.panel_shortcut, 'PRESS')
         addon_keymaps['main_window'] = (km_window, kmi)
-    except:
+        print(f"[WPT] Registered main panel with key: {preferences.panel_shortcut}")
+    except Exception as e:
+        print(f"[WPT] ERROR registering main panel: {e}")
         pass
     
     # Also register in 3D View context as backup
     try:
-        km_3d = kc.keymaps.new(name='3D View', space_type='VIEW_3D')
-        kmi_3d = km_3d.keymap_items.new('wm.call_panel', preferences.panel_shortcut, 'PRESS')
-        kmi_3d.properties.name = 'WPT_PT_main_panel'
-        kmi_3d.properties.keep_open = True
+        km_3d = kc.keymaps.get('3D View') or kc.keymaps.new(name='3D View', space_type='VIEW_3D')
+        kmi_3d = km_3d.keymap_items.new('wpt.toggle_main_panel', preferences.panel_shortcut, 'PRESS')
         addon_keymaps['main_3d_view'] = (km_3d, kmi_3d)
-    except:
+        print(f"[WPT] Registered 3D View panel with key: {preferences.panel_shortcut}")
+    except Exception as e:
+        print(f"[WPT] ERROR registering 3D View panel: {e}")
         pass
     
     # Toggle bones overlay - register in Window and 3D View contexts
@@ -90,7 +96,7 @@ def register_keymaps():
 
     # Weight Paint mode shortcuts
     try:
-        km_wp = kc.keymaps.new(name='Weight Paint', space_type='EMPTY')
+        km_wp = kc.keymaps.get('Weight Paint') or kc.keymaps.new(name='Weight Paint', space_type='EMPTY')
         
         # Pie menu for brushes in Weight Paint mode
         kmi_pie = km_wp.keymap_items.new('wm.call_menu_pie', preferences.pie_menu_shortcut, 'PRESS', 
@@ -135,9 +141,28 @@ def register_keymaps():
         pass
 
 def unregister_keymaps():
-    """Unregister all keymaps"""
+    """Unregister all keymaps - complete cleanup"""
     global addon_keymaps
     
+    wm = bpy.context.window_manager
+    if not wm:
+        return
+    
+    kc = wm.keyconfigs.addon
+    if not kc:
+        return
+    
+    # List of all operator IDs we use
+    addon_operator_ids = {
+        'wpt.toggle_main_panel',
+        'wpt.toggle_bones_overlay',
+        'wm.call_menu_pie',
+        'wpt.gradient_add_subtract',
+        'pose.activate_slider_control',
+        'pose.popup_panel'
+    }
+    
+    # First, remove tracked keymaps from addon_keymaps dict
     for key, (km, kmi) in addon_keymaps.items():
         try:
             if km and kmi and kmi in km.keymap_items:
@@ -146,11 +171,35 @@ def unregister_keymaps():
             continue
     
     addon_keymaps.clear()
+    
+    # Second, do a thorough scan to remove ANY remaining keymap items from our operators
+    # This handles legacy keymaps from previous sessions
+    for km in kc.keymaps:
+        items_to_remove = []
+        for kmi in km.keymap_items:
+            if kmi.idname in addon_operator_ids:
+                items_to_remove.append(kmi)
+        
+        for kmi in items_to_remove:
+            try:
+                km.keymap_items.remove(kmi)
+            except:
+                continue
 
 def update_keymaps(self, context):
     """Update callback for when preferences change"""
-    # Delay the keymap update to avoid issues during preference drawing
-    bpy.app.timers.register(lambda: register_keymaps(), first_interval=0.1)
+    print("[WPT] update_keymaps callback triggered")
+    # Use a timer to defer execution since context might be incomplete during property update
+    def do_update():
+        try:
+            register_keymaps()
+            print("[WPT] Keymaps updated successfully")
+            return None  # Return None to stop the timer
+        except Exception as e:
+            print(f"[WPT] Error updating keymaps: {e}")
+            return None
+    
+    bpy.app.timers.register(do_update, first_interval=0.01)
 
 # ===== KEY RECORDING OPERATORS =====
 
@@ -190,7 +239,12 @@ class WPT_OT_RecordKey(bpy.types.Operator):
             
             # Apply to preference
             preferences = context.preferences.addons[__name__].preferences
+            old_value = getattr(preferences, self.preference_name, None)
             setattr(preferences, self.preference_name, self.recorded_key)
+            new_value = getattr(preferences, self.preference_name, None)
+            
+            print(f"[WPT] Key Recording: {self.preference_name}")
+            print(f"[WPT] Old value: {old_value}, New value: {new_value}")
             
             context.area.header_text_set(None)
             self.report({'INFO'}, f"Key '{self.recorded_key}' assigned")
@@ -273,6 +327,22 @@ class WPT_OT_RecordModifiedKey(bpy.types.Operator):
         context.window_manager.modal_handler_add(self)
         context.area.header_text_set("Press a key combination (with modifiers) to assign (ESC to cancel)")
         return {'RUNNING_MODAL'}
+
+# ===== TOGGLE PANEL OPERATOR =====
+
+class WPT_OT_ToggleMainPanel(bpy.types.Operator):
+    """Toggle the main Weight Paint Tools panel"""
+    bl_idname = "wpt.toggle_main_panel"
+    bl_label = "Toggle Main Panel"
+    bl_description = "Toggle the Weight Paint Tools panel visibility"
+    
+    def execute(self, context):
+        # Use Blender's built-in operator to toggle the panel
+        try:
+            return bpy.ops.wm.call_panel(name='WPT_PT_main_panel')
+        except Exception as e:
+            self.report({'ERROR'}, f"Failed to toggle panel: {e}")
+            return {'FINISHED'}
 
 # ===== ADDON PREFERENCES =====
 
@@ -2157,6 +2227,7 @@ classes = [
     WPT_OT_RefreshKeymaps,
     WPT_OT_RecordKey,
     WPT_OT_RecordModifiedKey,
+    WPT_OT_ToggleMainPanel,
     WPT_OT_SetBrushMode,
     WPT_OT_SetupWeightPaint,
     WPT_OT_SwitchTool,

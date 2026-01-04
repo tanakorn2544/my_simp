@@ -1,0 +1,555 @@
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+
+bl_info = {
+    "name": "Enhanced Weight Paint Tools",
+    "author": "Enhanced by Assistant", 
+    "description": "Streamlined weight painting tools for character rigging",
+    "blender": (3, 0, 0),
+    "version": (2, 1, 0),
+    "location": "3D Viewport > Sidebar > Weight Paint",
+    "warning": "",
+    "doc_url": "", 
+    "tracker_url": "", 
+    "category": "Rigging" 
+}
+
+import bpy
+import bpy.utils.previews
+import os
+from mathutils.kdtree import KDTree
+from bpy.utils import flip_name
+
+addon_keymaps = {}
+_icons = None
+
+# ===== OPERATORS =====
+
+class WPT_OT_SetupWeightPaint(bpy.types.Operator):
+    """Automatically setup weight painting with the active mesh and armature"""
+    bl_idname = "wpt.setup_weight_paint"
+    bl_label = "Setup Weight Paint"
+    bl_description = "Automatically select armature and mesh, then enter Weight Paint mode"
+    bl_options = {"REGISTER", "UNDO"}
+
+    @classmethod
+    def poll(cls, context):
+        return context.active_object and context.active_object.type == 'MESH'
+
+    def execute(self, context):
+        mesh_obj = context.active_object
+        
+        # Find armature - check modifiers first, then scene
+        rig = None
+        for mod in mesh_obj.modifiers:
+            if mod.type == 'ARMATURE' and mod.object:
+                rig = mod.object
+                break
+        
+        if not rig:
+            rigs = [obj for obj in context.scene.objects if obj.type == 'ARMATURE']
+            if not rigs:
+                self.report({'ERROR'}, "No armature found in the scene")
+                return {'CANCELLED'}
+            if len(rigs) > 1:
+                self.report({'WARNING'}, "Multiple armatures found. Using the first one")
+            rig = rigs[0]
+
+        # Setup selection and mode
+        bpy.ops.object.select_all(action='DESELECT')
+        rig.select_set(True)
+        mesh_obj.select_set(True)
+        context.view_layer.objects.active = mesh_obj
+
+        # Enter Weight Paint mode
+        bpy.ops.object.mode_set(mode='WEIGHT_PAINT')
+        self.report({'INFO'}, f"Setup complete: '{rig.name}' + '{mesh_obj.name}'")
+        return {'FINISHED'}
+
+
+class WPT_OT_SwitchTool(bpy.types.Operator):
+    """Switch between weight paint tools"""
+    bl_idname = "wpt.switch_tool"
+    bl_label = "Switch Tool"
+    bl_description = "Switch to the specified weight paint tool"
+    bl_options = {"REGISTER", "UNDO"}
+    
+    tool_name: bpy.props.StringProperty(default="builtin_brush.Draw")
+
+    def execute(self, context):
+        try:
+            bpy.ops.wm.tool_set_by_id(name=self.tool_name)
+        except:
+            self.report({'WARNING'}, f"Could not switch to tool: {self.tool_name}")
+        return {'FINISHED'}
+
+
+class WPT_OT_MirrorWeights(bpy.types.Operator):
+    """Mirror vertex group weights across the specified axis"""
+    bl_idname = "wpt.mirror_weights"
+    bl_label = "Mirror Weights"
+    bl_description = "Mirror active vertex group weights across the X axis"
+    bl_options = {"REGISTER", "UNDO"}
+
+    axis: bpy.props.EnumProperty(
+        name="Axis",
+        items=[
+            ('X', "X-Axis", "Mirror across X axis"),
+            ('Y', "Y-Axis", "Mirror across Y axis"),
+            ('Z', "Z-Axis", "Mirror across Z axis"),
+        ],
+        default='X'
+    )
+
+    @classmethod
+    def poll(cls, context):
+        obj = context.active_object
+        return (obj and obj.type == 'MESH' and 
+                context.mode == 'PAINT_WEIGHT' and
+                obj.vertex_groups.active is not None)
+
+    def execute(self, context):
+        obj = context.active_object
+        vg_name = obj.vertex_groups.active.name
+        prev_mode = obj.mode
+        
+        try:
+            bpy.ops.object.mode_set(mode='OBJECT')
+            self.symmetrize_vertex_group(obj, vg_name, self.axis)
+            bpy.ops.object.mode_set(mode=prev_mode)
+            self.report({'INFO'}, f"Mirrored weights across {self.axis}-axis")
+            return {'FINISHED'}
+        except Exception as e:
+            try:
+                bpy.ops.object.mode_set(mode=prev_mode)
+            except:
+                pass
+            self.report({'ERROR'}, f"Failed to mirror weights: {str(e)}")
+            return {'CANCELLED'}
+
+    def symmetrize_vertex_group(self, obj, vg_name, axis='X', threshold=0.0001):
+        """Mirror vertex group weights using KDTree for vertex matching"""
+        vertices = obj.data.vertices
+        size = len(vertices)
+        kd = KDTree(size)
+        
+        for i, v in enumerate(vertices):
+            kd.insert(v.co, i)
+        kd.balance()
+
+        coord_i = 'XYZ'.find(axis)
+        vert_map = {}
+        
+        for vert_idx, vert in enumerate(vertices):
+            flipped_co = vert.co.copy()
+            flipped_co[coord_i] *= -1
+            _opposite_co, opposite_idx, dist = kd.find(flipped_co)
+            if dist <= threshold:
+                vert_map[vert_idx] = opposite_idx
+
+        vgroup = obj.vertex_groups.get(vg_name)
+        if not vgroup:
+            return
+
+        opp_name = flip_name(vg_name)
+        opp_vgroup = obj.vertex_groups.get(opp_name)
+        if not opp_vgroup:
+            opp_vgroup = obj.vertex_groups.new(name=opp_name)
+
+        if vgroup != opp_vgroup:
+            opp_vgroup.remove(range(len(vertices)))
+
+        # Collect and apply mirrored weights
+        dst_weights = {}
+        for src_idx, dst_idx in vert_map.items():
+            try:
+                src_weight = vgroup.weight(src_idx)
+                if dst_idx not in dst_weights:
+                    dst_weights[dst_idx] = []
+                dst_weights[dst_idx].append(src_weight)
+            except RuntimeError:
+                continue
+
+        for dst_idx, weights in dst_weights.items():
+            avg_weight = sum(weights) / len(weights)
+            if avg_weight > 0:
+                opp_vgroup.add([dst_idx], avg_weight, 'REPLACE')
+
+
+class WPT_OT_ToggleDeformBones(bpy.types.Operator):
+    """Toggle visibility of deform bones only"""
+    bl_idname = "wpt.toggle_deform_bones"
+    bl_label = "Deform Bones Only"
+    bl_description = "Show only deform bones (DEF/deform) in the active armature"
+    bl_options = {"REGISTER", "UNDO"}
+
+    def find_armature(self, context):
+        """Find armature from active object, modifiers, parent, or scene"""
+        obj = context.active_object
+        
+        # If active object is armature, use it
+        if obj and obj.type == 'ARMATURE':
+            return obj
+            
+        # If active object is mesh, check its armature modifier
+        if obj and obj.type == 'MESH':
+            for mod in obj.modifiers:
+                if mod.type == 'ARMATURE' and mod.object:
+                    return mod.object
+            
+            # Check if mesh is parented to armature
+            if obj.parent and obj.parent.type == 'ARMATURE':
+                return obj.parent
+        
+        # Fallback: find any armature in scene
+        for scene_obj in context.scene.objects:
+            if scene_obj.type == 'ARMATURE':
+                return scene_obj
+                
+        return None
+
+    def execute(self, context):
+        # Find armature - check active object, modifiers, parent, or scene
+        armature_obj = self.find_armature(context)
+        if not armature_obj:
+            self.report({'WARNING'}, "No armature found")
+            return {'CANCELLED'}
+            
+        arm = armature_obj.data
+        collections = getattr(arm, "collections_all", None)
+        
+        if collections:
+            # Hide all collections first
+            for col in collections:
+                col.is_visible = False
+            # Show DEF (Rigify) and Deform (Auto-Rig Pro) collections
+            deform_collections = ["DEF", "Deform", "deform"]
+            found_any = False
+            for col_name in deform_collections:
+                if col_name in collections:
+                    collections[col_name].is_visible = True
+                    found_any = True
+            
+            if not found_any:
+                self.report({'INFO'}, "No deform bone collections found")
+        else:
+            # Fallback: hide bones by name
+            deform_keywords = ["DEF", "deform", "Deform"]
+            for bone in arm.bones:
+                bone.hide = not any(keyword in bone.name for keyword in deform_keywords)
+                
+        return {'FINISHED'}
+
+
+class WPT_OT_ShowAllBones(bpy.types.Operator):
+    """Show all bones in the armature"""
+    bl_idname = "wpt.show_all_bones"
+    bl_label = "Show All Bones"
+    bl_description = "Show all bone collections and bones"
+    bl_options = {"REGISTER", "UNDO"}
+
+    def find_armature(self, context):
+        """Find armature from active object, modifiers, parent, or scene"""
+        obj = context.active_object
+        
+        # If active object is armature, use it
+        if obj and obj.type == 'ARMATURE':
+            return obj
+            
+        # If active object is mesh, check its armature modifier
+        if obj and obj.type == 'MESH':
+            for mod in obj.modifiers:
+                if mod.type == 'ARMATURE' and mod.object:
+                    return mod.object
+            
+            # Check if mesh is parented to armature
+            if obj.parent and obj.parent.type == 'ARMATURE':
+                return obj.parent
+        
+        # Fallback: find any armature in scene
+        for scene_obj in context.scene.objects:
+            if scene_obj.type == 'ARMATURE':
+                return scene_obj
+                
+        return None
+
+    def execute(self, context):
+        # Find armature - check active object, modifiers, parent, or scene
+        armature_obj = self.find_armature(context)
+        if not armature_obj:
+            self.report({'WARNING'}, "No armature found")
+            return {'CANCELLED'}
+        
+        arm = armature_obj.data
+        collections = getattr(arm, "collections_all", None)
+        
+        if collections:
+            for col in collections:
+                col.is_visible = True
+        else:
+            for bone in arm.bones:
+                bone.hide = False
+                
+        return {'FINISHED'}
+
+
+class WPT_OT_ApplyRestPose(bpy.types.Operator):
+    """Apply current pose as rest pose"""
+    bl_idname = "wpt.apply_rest_pose"
+    bl_label = "Apply as Rest Pose"
+    bl_description = "Apply the current pose as the new rest pose for the active armature"
+    bl_options = {"REGISTER", "UNDO"}
+
+    def find_armature(self, context):
+        """Find armature from active object, modifiers, parent, or scene"""
+        obj = context.active_object
+        
+        # If active object is armature, use it
+        if obj and obj.type == 'ARMATURE':
+            return obj
+            
+        # If active object is mesh, check its armature modifier
+        if obj and obj.type == 'MESH':
+            for mod in obj.modifiers:
+                if mod.type == 'ARMATURE' and mod.object:
+                    return mod.object
+            
+            # Check if mesh is parented to armature
+            if obj.parent and obj.parent.type == 'ARMATURE':
+                return obj.parent
+        
+        # Fallback: find any armature in scene
+        for scene_obj in context.scene.objects:
+            if scene_obj.type == 'ARMATURE':
+                return scene_obj
+                
+        return None
+
+    @classmethod
+    def poll(cls, context):
+        # Must be in pose mode, and have access to an armature
+        if context.mode != 'POSE':
+            return False
+        obj = context.active_object
+        return obj and obj.type == 'ARMATURE'
+
+    def execute(self, context):
+        armature_obj = self.find_armature(context)
+        if not armature_obj:
+            self.report({'WARNING'}, "No armature found")
+            return {'CANCELLED'}
+            
+        try:
+            # Make sure armature is active for the operation
+            prev_active = context.active_object
+            context.view_layer.objects.active = armature_obj
+            
+            bpy.ops.object.mode_set(mode='OBJECT')
+            bpy.ops.object.armature_apply(selected=False)
+            bpy.ops.object.mode_set(mode='POSE')
+            
+            # Restore previous active object if it was different
+            if prev_active != armature_obj:
+                context.view_layer.objects.active = prev_active
+                
+            self.report({'INFO'}, "Rest pose applied successfully")
+            return {'FINISHED'}
+        except Exception as e:
+            self.report({'ERROR'}, f"Failed to apply rest pose: {str(e)}")
+            return {'CANCELLED'}
+
+
+# ===== UI PANELS =====
+
+class WPT_PT_MainPanel(bpy.types.Panel):
+    """Main weight paint tools panel"""
+    bl_label = 'Weight Paint Tools'
+    bl_idname = 'WPT_PT_main_panel'
+    bl_space_type = 'VIEW_3D'
+    bl_region_type = 'UI'
+    bl_category = 'Weight Paint'
+    bl_order = 0
+
+    @classmethod
+    def poll(cls, context):
+        return True
+
+    def draw_header(self, context):
+        layout = self.layout
+        layout.label(icon='MOD_VERTEX_WEIGHT')
+
+    def draw(self, context):
+        layout = self.layout
+        obj = context.active_object
+        
+        # Setup section
+        box = layout.box()
+        box.label(text="Setup", icon='SETTINGS')
+        
+        if obj and obj.type == 'MESH':
+            box.operator('wpt.setup_weight_paint', icon='MOD_ARMATURE')
+        else:
+            box.label(text="Select a mesh object", icon='INFO')
+
+        # Note: Paint tools and bone tools are now in separate sub-panels
+
+
+class WPT_PT_PaintTools(bpy.types.Panel):
+    """Weight paint tools sub-panel"""
+    bl_label = 'Paint Tools'
+    bl_idname = 'WPT_PT_paint_tools'
+    bl_space_type = 'VIEW_3D'
+    bl_region_type = 'UI'
+    bl_category = 'Weight Paint'
+    bl_parent_id = 'WPT_PT_main_panel'
+    bl_order = 1
+
+    @classmethod
+    def poll(cls, context):
+        return context.mode == 'PAINT_WEIGHT'
+
+    def draw(self, context):
+        layout = self.layout
+        
+        # Quick tool switches
+        row = layout.row(align=True)
+        op = row.operator('wpt.switch_tool', text='Draw', icon='BRUSH_DATA')
+        op.tool_name = "builtin_brush.Draw"
+        op = row.operator('wpt.switch_tool', text='Gradient', icon='IPO_LINEAR')
+        op.tool_name = "builtin.gradient"
+        
+        # Weight value
+        scene = context.scene
+        if hasattr(scene.tool_settings, 'unified_paint_settings'):
+            layout.prop(scene.tool_settings.unified_paint_settings, 'weight', 
+                       text='Weight', slider=True)
+        
+        # Mirror weights
+        layout.separator()
+        col = layout.column(align=True)
+        col.label(text="Mirror Weights:")
+        row = col.row(align=True)
+        
+        for axis in ['X', 'Y', 'Z']:
+            op = row.operator('wpt.mirror_weights', text=axis)
+            op.axis = axis
+
+
+class WPT_PT_BoneTools(bpy.types.Panel):
+    """Bone visibility tools sub-panel"""
+    bl_label = 'Bone Visibility'
+    bl_idname = 'WPT_PT_bone_tools'
+    bl_space_type = 'VIEW_3D'
+    bl_region_type = 'UI'
+    bl_category = 'Weight Paint'
+    bl_parent_id = 'WPT_PT_main_panel'
+    bl_order = 2
+
+    @classmethod
+    def poll(cls, context):
+        obj = context.active_object
+        if not obj:
+            return False
+        # Works with armatures directly or meshes that have armature modifiers/parents
+        if obj.type == 'ARMATURE':
+            return True
+        if obj.type == 'MESH':
+            # Check for armature modifier
+            for mod in obj.modifiers:
+                if mod.type == 'ARMATURE' and mod.object:
+                    return True
+            # Check for armature parent
+            if obj.parent and obj.parent.type == 'ARMATURE':
+                return True
+        # Fallback: check if any armature exists in scene
+        return any(scene_obj.type == 'ARMATURE' for scene_obj in context.scene.objects)
+
+    def draw(self, context):
+        layout = self.layout
+        
+        # Bone visibility controls
+        row = layout.row(align=True)
+        row.operator("wpt.toggle_deform_bones", text="Deform Only", icon='BONE_DATA')
+        row.operator("wpt.show_all_bones", text="Show All", icon='GROUP_BONE')
+        
+        # Rest pose tools
+        if context.mode == 'POSE':
+            layout.separator()
+            layout.operator('wpt.apply_rest_pose', icon='ARMATURE_DATA')
+
+
+class WPT_PT_DisplayOptions(bpy.types.Panel):
+    """Display options sub-panel"""
+    bl_label = 'Display Options'
+    bl_idname = 'WPT_PT_display_options'
+    bl_space_type = 'VIEW_3D'
+    bl_region_type = 'UI'
+    bl_category = 'Weight Paint'
+    bl_parent_id = 'WPT_PT_main_panel'
+    bl_order = 3
+
+    def draw(self, context):
+        layout = self.layout
+        
+        # Vertex group selection
+        if context.mode == 'PAINT_WEIGHT':
+            scene = context.scene
+            layout.prop(scene.tool_settings, 'vertex_group_user', 
+                       text="Restrict to Group")
+        
+        # Overlay options
+        if hasattr(context, 'space_data') and hasattr(context.space_data, 'overlay'):
+            overlay = context.space_data.overlay
+            layout.prop(overlay, 'show_wireframes', text="Show Wireframe")
+
+
+# ===== REGISTRATION =====
+
+classes = [
+    WPT_OT_SetupWeightPaint,
+    WPT_OT_SwitchTool,
+    WPT_OT_MirrorWeights,
+    WPT_OT_ToggleDeformBones,
+    WPT_OT_ShowAllBones,
+    WPT_OT_ApplyRestPose,
+    WPT_PT_MainPanel,
+    WPT_PT_PaintTools,
+    WPT_PT_BoneTools,
+    WPT_PT_DisplayOptions,
+]
+
+def register():
+    global _icons
+    _icons = bpy.utils.previews.new()
+    
+    for cls in classes:
+        bpy.utils.register_class(cls)
+    
+    # Register keymap
+    wm = bpy.context.window_manager
+    kc = wm.keyconfigs.addon
+    if kc:
+        km = kc.keymaps.new(name='3D View', space_type='VIEW_3D')
+        kmi = km.keymap_items.new('wm.call_panel', 'Y', 'PRESS', 
+                                 ctrl=False, alt=False, shift=False, repeat=False)
+        kmi.properties.name = 'WPT_PT_main_panel'
+        kmi.properties.keep_open = True
+        addon_keymaps['main'] = (km, kmi)
+
+def unregister():
+    global _icons
+    if _icons:
+        bpy.utils.previews.remove(_icons)
+    
+    # Unregister keymap
+    for km, kmi in addon_keymaps.values():
+        km.keymap_items.remove(kmi)
+    addon_keymaps.clear()
+    
+    for cls in reversed(classes):
+        bpy.utils.unregister_class(cls)
+
+if __name__ == "__main__":
+    register()

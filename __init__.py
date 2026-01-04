@@ -109,8 +109,29 @@ def register_keymaps():
         # Gradient Add/Subtract toggle
         kmi_gradient = km_wp.keymap_items.new('wpt.gradient_add_subtract', preferences.gradient_toggle_shortcut, 'PRESS')
         addon_keymaps['gradient_toggle'] = (km_wp, kmi_gradient)
-    except:
+        
+        # Quick mesh switch with U key (in weight paint mode) - after Alt+Q to switch object
+        kmi_switch = km_wp.keymap_items.new('wpt.quick_switch_mesh', preferences.quick_switch_mesh_shortcut, 'PRESS', 
+                                           ctrl=preferences.quick_switch_mesh_ctrl,
+                                           alt=preferences.quick_switch_mesh_alt,
+                                           shift=preferences.quick_switch_mesh_shift)
+        addon_keymaps['quick_switch_mesh'] = (km_wp, kmi_switch)
+        print("[WPT] Registered quick switch mesh with Alt+U in Weight Paint mode")
+    except Exception as e:
+        print(f"[WPT] ERROR registering quick switch mesh: {e}")
         pass
+    
+    # Also try registering in 3D View context for weight paint
+    try:
+        km_3d = kc.keymaps.get('3D View') or kc.keymaps.new(name='3D View', space_type='VIEW_3D')
+        kmi_switch_3d = km_3d.keymap_items.new('wpt.quick_switch_mesh', preferences.quick_switch_mesh_shortcut, 'PRESS',
+                                              ctrl=preferences.quick_switch_mesh_ctrl,
+                                              alt=preferences.quick_switch_mesh_alt,
+                                              shift=preferences.quick_switch_mesh_shift)
+        addon_keymaps['quick_switch_mesh_3d'] = (km_3d, kmi_switch_3d)
+        print("[WPT] Registered quick switch mesh with Alt+U in 3D View")
+    except Exception as e:
+        print(f"[WPT] ERROR registering quick switch mesh in 3D View: {e}")
     
     # Pose Slider shortcuts - register in Window context for global access
     try:
@@ -400,6 +421,34 @@ class WPT_AddonPreferences(bpy.types.AddonPreferences):
         update=update_keymaps
     )
     
+    quick_switch_mesh_shortcut: bpy.props.StringProperty(
+        name="Quick Switch Mesh",
+        description="Shortcut key to confirm object switch after using Alt+Q",
+        default="U",
+        update=update_keymaps
+    )
+    
+    quick_switch_mesh_alt: bpy.props.BoolProperty(
+        name="Alt",
+        description="Use Alt modifier for quick switch mesh shortcut",
+        default=True,
+        update=update_keymaps
+    )
+    
+    quick_switch_mesh_ctrl: bpy.props.BoolProperty(
+        name="Ctrl",
+        description="Use Ctrl modifier for quick switch mesh shortcut",
+        default=False,
+        update=update_keymaps
+    )
+    
+    quick_switch_mesh_shift: bpy.props.BoolProperty(
+        name="Shift",
+        description="Use Shift modifier for quick switch mesh shortcut",
+        default=False,
+        update=update_keymaps
+    )
+    
     # Bone collection storage
     stored_bone_collections: bpy.props.StringProperty(
         name="Stored Bone Collections",
@@ -471,6 +520,25 @@ class WPT_AddonPreferences(bpy.types.AddonPreferences):
         sub_row.prop(self, "gradient_toggle_shortcut", text="")
         op = sub_row.operator("wpt.record_key", text="Record", icon='REC')
         op.preference_name = "gradient_toggle_shortcut"
+        
+        # Quick switch mesh with modifiers
+        row = grid.row(align=True)
+        split = row.split(factor=0.3)
+        split.label(text="Quick Switch Mesh:")
+        sub_col = split.column(align=True)
+        
+        # Key and modifiers row
+        sub_row = sub_col.row(align=True)
+        sub_row.prop(self, "quick_switch_mesh_shortcut", text="")
+        
+        # Modifier checkboxes
+        mod_row = sub_row.row(align=True)
+        mod_row.prop(self, "quick_switch_mesh_ctrl", text="Ctrl", toggle=True)
+        mod_row.prop(self, "quick_switch_mesh_alt", text="Alt", toggle=True)
+        mod_row.prop(self, "quick_switch_mesh_shift", text="Shift", toggle=True)
+        
+        # Record button for quick switch mesh
+        sub_row.operator("wpt.record_modified_key", text="Record", icon='REC')
         
         # Add button to manually refresh keymaps
         layout.separator()
@@ -550,13 +618,28 @@ class WPT_OT_SetupWeightPaint(bpy.types.Operator):
             rig = rigs[0]
 
         # Setup selection and mode
-        bpy.ops.object.select_all(action='DESELECT')
-        rig.select_set(True)
-        mesh_obj.select_set(True)
+        # CRITICAL: Set active object BEFORE selecting, in correct order
+        for obj in context.scene.objects:
+            obj.select_set(False)
+        
+        # Set mesh as active FIRST
         context.view_layer.objects.active = mesh_obj
+        mesh_obj.select_set(True)
+        rig.select_set(True)
 
         # Enter Weight Paint mode
-        bpy.ops.object.mode_set(mode='WEIGHT_PAINT')
+        try:
+            bpy.ops.object.mode_set(mode='WEIGHT_PAINT')
+        except RuntimeError:
+            # If context is wrong, try with 3D view override
+            for area in context.screen.areas:
+                if area.type == 'VIEW_3D':
+                    with context.temp_override(area=area):
+                        try:
+                            bpy.ops.object.mode_set(mode='WEIGHT_PAINT')
+                        except:
+                            pass
+                    break
         self.report({'INFO'}, f"Setup complete: '{rig.name}' + '{mesh_obj.name}'")
         return {'FINISHED'}
 
@@ -576,6 +659,69 @@ class WPT_OT_SwitchTool(bpy.types.Operator):
         except:
             self.report({'WARNING'}, f"Could not switch to tool: {self.tool_name}")
         return {'FINISHED'}
+
+
+class WPT_OT_QuickSwitchMesh(bpy.types.Operator):
+    """Switch mesh after using Alt+Q - press U to confirm"""
+    bl_idname = "wpt.quick_switch_mesh"
+    bl_label = "Confirm Mesh Switch"
+    bl_description = "After using Alt+Q to switch object, press U to finalize in weight paint mode"
+    bl_options = {"REGISTER"}
+
+    @classmethod
+    def poll(cls, context):
+        # Must be in weight paint mode
+        return context.mode == 'PAINT_WEIGHT'
+
+    def execute(self, context):
+        print("[DEBUG] WPT_OT_QuickSwitchMesh operator called")
+        current_mesh = context.active_object
+        if not current_mesh or current_mesh.type != 'MESH':
+            self.report({'ERROR'}, "No active mesh")
+            return {'CANCELLED'}
+
+        # Find armature from current mesh
+        armature = None
+        for mod in current_mesh.modifiers:
+            if mod.type == 'ARMATURE':
+                armature = mod.object
+                break
+
+        if not armature:
+            self.report({'ERROR'}, "No armature found")
+            return {'CANCELLED'}
+
+        try:
+            # Save selected bones
+            selected_bones = [b.name for b in armature.data.bones if b.select]
+
+            # Go to object mode
+            bpy.ops.object.mode_set(mode='OBJECT')
+
+            # Deselect all
+            for obj in context.scene.objects:
+                obj.select_set(False)
+
+            # Select rig (armature) and mesh, with mesh as active
+            armature.select_set(True)
+            current_mesh.select_set(True)
+            context.view_layer.objects.active = current_mesh
+
+            # Re-enter weight paint mode
+            bpy.ops.object.mode_set(mode='WEIGHT_PAINT')
+
+            # Restore bone selection
+            if selected_bones:
+                for bone in armature.data.bones:
+                    if bone.name in selected_bones:
+                        bone.select = True
+
+            self.report({'INFO'}, f"Switched to {current_mesh.name} in weight paint mode")
+            return {'FINISHED'}
+
+        except Exception as e:
+            self.report({'ERROR'}, str(e))
+            return {'CANCELLED'}
 
 
 class WPT_OT_MirrorWeights(bpy.types.Operator):
@@ -2231,6 +2377,7 @@ classes = [
     WPT_OT_SetBrushMode,
     WPT_OT_SetupWeightPaint,
     WPT_OT_SwitchTool,
+    WPT_OT_QuickSwitchMesh,
     WPT_OT_MirrorWeights,
     WPT_OT_ToggleDeformBones,
     WPT_OT_ShowAllBones,

@@ -8,7 +8,7 @@ bl_info = {
     "author": "Korn Sensei", 
     "description": "Streamlined weight painting tools for character rigging",
     "blender": (3, 0, 0),
-    "version": (2, 7, 1),
+    "version": (2, 8, 1),
     "location": "3D Viewport > Sidebar > Weight Paint",
     "warning": "",
     "doc_url": "", 
@@ -1567,19 +1567,20 @@ class WPT_PT_MainPanel(bpy.types.Panel):
         layout = self.layout
         obj = context.active_object
         
-        # Setup section
+        # Setup section (Restored to main panel)
         box = layout.box()
         box.label(text="Setup", icon='SETTINGS')
         
         if obj and obj.type == 'MESH':
+            # Fast access to weight paint setup
             box.operator('wpt.setup_weight_paint', icon='MOD_ARMATURE')
             
-            # Add Cut & Mirror section
-            cut_mirror_box = box.box()
-            cut_mirror_box.label(text="Symmetry Tools", icon='MOD_MIRROR')
-            row = cut_mirror_box.row(align=True)
-            row.operator("wpt.cut_half_mesh", icon='SCULPTMODE_HLT')
-            row.operator("wpt.add_mirror", icon='MOD_MIRROR')
+            # Symmetry Tool - Compacted
+            box.separator()
+            row = box.row(align=True)
+            row.label(text="Symmetry:", icon='MOD_MIRROR')
+            row.operator("wpt.cut_half_mesh", text="Cut Half", icon='SCULPTMODE_HLT')
+            row.operator("wpt.add_mirror", text="Add Mirror", icon='MOD_MIRROR')
         else:
             box.label(text="Select a mesh object", icon='INFO')
 
@@ -1731,6 +1732,11 @@ class WPT_PT_DisplayOptions(bpy.types.Panel):
         if hasattr(context, 'space_data') and hasattr(context.space_data, 'overlay'):
             overlay = context.space_data.overlay
             layout.prop(overlay, 'show_wireframes', text="Show Wireframe")
+
+        # Show Bones in Front
+        armature = get_active_armature(context)
+        if armature:
+            layout.prop(armature, 'show_in_front', text="Show Bones In Front")
 
 
 # ===== POSE SLIDER FUNCTIONALITY =====
@@ -2317,55 +2323,42 @@ class WPT_PT_PoseSliderPanel(bpy.types.Panel):
             layout.label(text="⚠ Will work with any rig", icon='INFO')
         
         # Save pose section
-        box = layout.box()
-        box.label(text="Pose Management:", icon='POSE_HLT')
-        box.prop(props, "pose_name", text="Name")
-        
-        # Save pose button - using correct operator ID
-        col = box.column()
-        col.operator("pose.save_pose", text="Save Current Pose", icon='ADD')
+        layout.label(text="Pose Management:", icon='POSE_HLT')
+        row = layout.row(align=True)
+        row.prop(props, "pose_name", text="")
+        row.operator("pose.save_pose", text="Save", icon='ADD')
         
         # Quick pose generation
-        row = box.row(align=True)
+        row = layout.row(align=True)
         row.operator("pose.generate_t_pose", text="T-Pose", icon='OUTLINER_OB_ARMATURE')
         row.operator("pose.reset_to_restpose", text="Reset", icon='ARMATURE_DATA')
         
         # Pose management section
         if context.scene.pose_collection:
-            box.separator()
-            box.label(text="Saved Poses:")
+            layout.separator()
             
             # Pose selector and controls
-            row = box.row(align=True)
+            row = layout.row(align=True)
             row.prop(props, "selected_pose", text="")
             row.operator("pose.rename_pose", text="", icon='GREASEPENCIL')
             row.operator("pose.delete_pose", text="", icon='X')
             
             # Pose slider
-            box.separator()
-            box.label(text="Blend Factor:")
-            box.prop(props, "pose_factor", text="", slider=True)
+            row = layout.row(align=True)
+            row.prop(props, "pose_factor", text="Factor", slider=True)
             
-            # Pose controls
-            row = box.row(align=True)
+            # Pose blending controls
+            row = layout.row(align=True)
             row.operator("pose.reset_to_restpose", text="Reset")
             row.operator("pose.apply_full_pose", text="Apply Full")
             
-            # Info
-            box.label(text=f"Total Poses: {len(context.scene.pose_collection)}", icon='INFO')
         else:
-            box.separator()
-            info_box = box.box()
-            info_box.label(text="No poses saved", icon='INFO')
-            info_box.label(text="1. Pose your armature")
-            info_box.label(text="2. Enter a name above")
-            info_box.label(text="3. Click 'Save Current Pose'")
+            layout.separator()
+            layout.label(text="No poses saved. Pose armature & Save.", icon='INFO')
         
         # Mouse control hint
         layout.separator()
-        box = layout.box()
-        box.label(text="Mouse Control:", icon='MOUSE_MMB')
-        box.label(text="Press X + Middle Mouse drag")
+        layout.label(text="Hold X + Move Mouse to blend", icon='MOUSE_MMB')
 # ===== REGISTRATION =====
 
 classes = [

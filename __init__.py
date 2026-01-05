@@ -8,7 +8,7 @@ bl_info = {
     "author": "Korn Sensei", 
     "description": "Streamlined weight painting tools for character rigging",
     "blender": (3, 0, 0),
-    "version": (2, 8, 1),
+    "version": (2, 8, 2),
     "location": "3D Viewport > Sidebar > Weight Paint",
     "warning": "",
     "doc_url": "", 

@@ -14,6 +14,7 @@ Designed for character artists who want to stay in flow.
 - Brush **Pie Menu** for fast switching (`Alt + Q` or `Q`)
 - Gradient tool **Add / Subtract toggle**
 - Unified weight slider access
+- **Flood Smooth**: Quickly smooth weights on selected vertices (Edit mode selection sync).
 - **Compact UI**: Setup tools are now neatly organized in the main panel for instant access.
 
 ### 🧍 Rig & Bone Utilities

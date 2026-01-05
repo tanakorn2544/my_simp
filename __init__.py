@@ -1546,6 +1546,58 @@ class WPT_MT_BrushPieMenu(bpy.types.Menu):
 
 # ===== UI PANELS =====
 
+
+class WPT_OT_FloodSmooth(bpy.types.Operator):
+    """Flood smooth weights on selected vertices"""
+    bl_idname = "wpt.flood_smooth"
+    bl_label = "Flood Smooth"
+    bl_options = {'REGISTER', 'UNDO'}
+    
+    iterations: bpy.props.IntProperty(
+        name="Iterations", 
+        default=5, 
+        min=1, 
+        description="Number of smoothing iterations"
+    )
+    strength: bpy.props.FloatProperty(
+        name="Strength", 
+        default=1.0, 
+        min=0.0, 
+        max=1.0, 
+        description="Smoothing strength"
+    )
+    
+    @classmethod
+    def poll(cls, context):
+        return (context.active_object and 
+                context.active_object.type == 'MESH' and 
+                context.mode == 'PAINT_WEIGHT')
+    
+    def execute(self, context):
+        obj = context.active_object
+        
+        # Ensure paint mask is enabled to respect selection
+        original_mask_mode = obj.data.use_paint_mask_vertex
+        obj.data.use_paint_mask_vertex = True
+        
+        try:
+            bpy.ops.object.vertex_group_smooth(
+                group_select_mode='ALL',
+                repeat=self.iterations,
+                factor=self.strength
+            )
+            self.report({'INFO'}, f"Flood Smoothed (Iter: {self.iterations})")
+        except Exception as e:
+            self.report({'ERROR'}, f"Flood Smooth Failed: {str(e)}")
+            return {'CANCELLED'}
+        finally:
+            # Restore original mask mode (optional, generally keeping it on is helpful)
+            # obj.data.use_paint_mask_vertex = original_mask_mode 
+            # Commented out: User likely wants to keep the mask on if they are working with selection
+            pass
+            
+        return {'FINISHED'}
+
 class WPT_PT_MainPanel(bpy.types.Panel):
     """Main weight paint tools panel"""
     bl_label = 'Weight Paint Tools'
@@ -1616,6 +1668,10 @@ class WPT_PT_PaintTools(bpy.types.Panel):
         if hasattr(scene.tool_settings, 'unified_paint_settings'):
             layout.prop(scene.tool_settings.unified_paint_settings, 'weight', 
                        text='Weight', slider=True)
+        
+        layout.separator()
+        row = layout.row(align=True)
+        row.operator("wpt.flood_smooth", text="Flood Smooth Selection", icon='BRUSH_BLUR')
         
         # Mirror weights
         layout.separator()
@@ -2384,6 +2440,7 @@ classes = [
     WPT_OT_ToggleBonesOverlay,
     WPT_OT_CutHalfMesh,
     WPT_OT_AddMirror,
+    WPT_OT_FloodSmooth,
     WPT_MT_BrushPieMenu,
     WPT_PT_MainPanel,
     WPT_PT_PaintTools,

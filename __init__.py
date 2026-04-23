@@ -8,7 +8,7 @@ bl_info = {
     "author": "Korn Sensei", 
     "description": "Streamlined weight painting tools for character rigging",
     "blender": (3, 0, 0),
-    "version": (2, 8, 2),
+    "version": (2, 9, 0),
     "location": "3D Viewport > Sidebar > Weight Paint",
     "warning": "",
     "doc_url": "", 
@@ -449,6 +449,13 @@ class WPT_AddonPreferences(bpy.types.AddonPreferences):
         update=update_keymaps
     )
     
+    # UI toggle for feature guide
+    show_feature_guide: bpy.props.BoolProperty(
+        name="Show Features & Shortcuts Guide",
+        description="Show detailed descriptions of all features and shortcuts",
+        default=False
+    )
+    
     # Bone collection storage
     stored_bone_collections: bpy.props.StringProperty(
         name="Stored Bone Collections",
@@ -543,6 +550,132 @@ class WPT_AddonPreferences(bpy.types.AddonPreferences):
         # Add button to manually refresh keymaps
         layout.separator()
         layout.operator("wpt.refresh_keymaps", text="Refresh Keymaps", icon='FILE_REFRESH')
+        
+        # ===== FEATURES & SHORTCUTS GUIDE =====
+        layout.separator()
+        guide_box = layout.box()
+        row = guide_box.row()
+        row.prop(self, "show_feature_guide", 
+                 icon='TRIA_DOWN' if self.show_feature_guide else 'TRIA_RIGHT',
+                 text="Features & Shortcuts Guide", emboss=False)
+        
+        if self.show_feature_guide:
+            col = guide_box.column(align=True)
+            
+            # --- Shortcut Descriptions ---
+            sub = col.box()
+            sub.label(text="Keyboard Shortcuts", icon='KEYINGSET')
+            
+            # Open Panel
+            r = sub.column(align=True)
+            r.label(text="Open Panel", icon='MENU_PANEL')
+            r.label(text="    Opens the My Simp panel as a popup anywhere in Blender.")
+            r.label(text="    Works in any mode or editor — quick access without")
+            r.label(text="    needing to find the N-panel tab.")
+            sub.separator()
+            
+            # Toggle Bones Overlay
+            r = sub.column(align=True)
+            r.label(text="Toggle Bones Overlay", icon='BONE_DATA')
+            r.label(text="    Quickly hide/show bone overlays in the 3D viewport.")
+            r.label(text="    Useful when bones are cluttering the view while")
+            r.label(text="    weight painting or posing.")
+            sub.separator()
+            
+            # Brush Pie Menu
+            r = sub.column(align=True)
+            r.label(text="Brush Pie Menu", icon='BRUSHES_ALL')
+            r.label(text="    Opens a pie menu with all weight paint brushes:")
+            r.label(text="    Draw (Mix/Add/Sub), Smooth, Blur, Average,")
+            r.label(text="    Gradient, and Sample Weight. Works only in")
+            r.label(text="    Weight Paint mode.")
+            sub.separator()
+            
+            # Gradient Add/Subtract
+            r = sub.column(align=True)
+            r.label(text="Gradient Add/Subtract", icon='IPO_LINEAR')
+            r.label(text="    Switches to the Gradient tool and toggles between")
+            r.label(text="    Add and Subtract blend modes. Great for quickly")
+            r.label(text="    painting linear weight falloffs.")
+            sub.separator()
+            
+            # Quick Switch Mesh
+            r = sub.column(align=True)
+            r.label(text="Quick Switch Mesh", icon='UV_SYNC_SELECT')
+            r.label(text="    After switching objects with Alt+Q in weight paint")
+            r.label(text="    mode, press this shortcut to finalize the switch.")
+            r.label(text="    Re-enters weight paint mode with the armature")
+            r.label(text="    properly linked to the new mesh.")
+            sub.separator()
+            
+            # Pose Slider
+            r = sub.column(align=True)
+            r.label(text="Pose Slider (X key + Mouse)", icon='ARMATURE_DATA')
+            r.label(text="    Hold X and move mouse to interactively blend between")
+            r.label(text="    rest pose and a saved pose. LMB to confirm, RMB/ESC")
+            r.label(text="    to cancel. Press P for the popup panel.")
+            
+            # --- Feature Descriptions ---
+            col.separator()
+            sub = col.box()
+            sub.label(text="Panel Features", icon='TOOL_SETTINGS')
+            
+            # Setup
+            r = sub.column(align=True)
+            r.label(text="Setup Weight Paint", icon='MOD_ARMATURE')
+            r.label(text="    One-click setup: selects your mesh + armature and")
+            r.label(text="    enters Weight Paint mode with everything linked.")
+            r.label(text="    No more manual selection juggling.")
+            sub.separator()
+            
+            # Symmetry
+            r = sub.column(align=True)
+            r.label(text="Symmetry Tools", icon='MOD_MIRROR')
+            r.label(text="    Cut Half: Bisects mesh along an axis for one-sided")
+            r.label(text="    weight painting. Add Mirror: Adds a mirror modifier")
+            r.label(text="    with weight mirroring enabled.")
+            sub.separator()
+            
+            # Paint Tools
+            r = sub.column(align=True)
+            r.label(text="Paint Tools", icon='BRUSH_DATA')
+            r.label(text="    Flood Smooth: Smooths weights on selected vertices.")
+            r.label(text="    Mirror Weights: Mirrors weights across X/Y/Z axis")
+            r.label(text="    using KDTree matching (handles asymmetric meshes).")
+            sub.separator()
+            
+            # Bone Visibility
+            r = sub.column(align=True)
+            r.label(text="Bone Visibility", icon='GROUP_BONE')
+            r.label(text="    Deform Only: Hides all non-deform bones (MCH, ORG).")
+            r.label(text="    Show All: Shows controller + deform bones.")
+            r.label(text="    Collection Presets: Save/load bone collection")
+            r.label(text="    visibility states for quick switching.")
+            sub.separator()
+            
+            # Pose Slider
+            r = sub.column(align=True)
+            r.label(text="Pose Slider", icon='POSE_HLT')
+            r.label(text="    Save poses and blend between rest and posed states")
+            r.label(text="    using a slider. Useful for checking deformations")
+            r.label(text="    at different pose intensities while weight painting.")
+            sub.separator()
+            
+            # Weight Inspector
+            r = sub.column(align=True)
+            r.label(text="Weight Inspector", icon='VIEWZOOM')
+            r.label(text="    Select vertices in edit mode and see exactly which")
+            r.label(text="    vertex groups are influencing them, sorted by weight.")
+            r.label(text="    Quickly identify and remove bad weights causing")
+            r.label(text="    deformation issues.")
+            sub.separator()
+            
+            # Toggle Pose/Rest
+            r = sub.column(align=True)
+            r.label(text="Toggle Pose/Rest", icon='MODIFIER_ON')
+            r.label(text="    Toggles armature modifiers on ALL meshes at once.")
+            r.label(text="    Quickly switch between posed and rest position")
+            r.label(text="    to check weight painting results.")
 
 # Add operator to manually refresh keymaps
 class WPT_OT_RefreshKeymaps(bpy.types.Operator):
@@ -1598,6 +1731,188 @@ class WPT_OT_FloodSmooth(bpy.types.Operator):
             
         return {'FINISHED'}
 
+
+# ===== WEIGHT INSPECTOR =====
+
+class WPT_OT_EnableVertexSelect(bpy.types.Operator):
+    """Enable vertex selection mask in Weight Paint mode for inspection"""
+    bl_idname = "wpt.enable_vertex_select"
+    bl_label = "Enable Vertex Select"
+    bl_description = "Enable vertex selection mask so you can select vertices to inspect"
+    bl_options = {"REGISTER", "UNDO"}
+
+    @classmethod
+    def poll(cls, context):
+        return (context.active_object and 
+                context.active_object.type == 'MESH' and
+                context.mode == 'PAINT_WEIGHT')
+
+    def execute(self, context):
+        obj = context.active_object
+        obj.data.use_paint_mask_vertex = True
+        self.report({'INFO'}, "Vertex selection enabled. Select vertices, then click 'Inspect Selected'")
+        return {'FINISHED'}
+
+
+class WPT_OT_InspectSelectedWeights(bpy.types.Operator):
+    """Inspect vertex group weights for selected vertices in Weight Paint mode"""
+    bl_idname = "wpt.inspect_selected_weights"
+    bl_label = "Inspect Selected"
+    bl_description = "Show all vertex group weights for the selected vertices, sorted by influence"
+    bl_options = {"REGISTER"}
+
+    @classmethod
+    def poll(cls, context):
+        obj = context.active_object
+        return (obj and obj.type == 'MESH' and context.mode == 'PAINT_WEIGHT')
+
+    def execute(self, context):
+        obj = context.active_object
+        mesh = obj.data
+        
+        selected_verts = [v for v in mesh.vertices if v.select]
+        
+        if not selected_verts:
+            self.report({'WARNING'}, "No vertices selected. Enable vertex select and pick vertices first.")
+            return {'CANCELLED'}
+        
+        weight_data = {}
+        
+        for vert in selected_verts:
+            for group_elem in vert.groups:
+                group_idx = group_elem.group
+                if group_idx < len(obj.vertex_groups):
+                    group_name = obj.vertex_groups[group_idx].name
+                    weight = group_elem.weight
+                    if weight > 0.0001:
+                        if group_name not in weight_data:
+                            weight_data[group_name] = []
+                        weight_data[group_name].append((vert.index, weight))
+        
+        if not weight_data:
+            self.report({'INFO'}, "Selected vertices have no vertex group weights.")
+            context.scene.weight_inspect_results.clear()
+            return {'FINISHED'}
+        
+        group_averages = []
+        for group_name, vert_weights in weight_data.items():
+            avg_weight = sum(w for _, w in vert_weights) / len(vert_weights)
+            max_weight = max(w for _, w in vert_weights)
+            vert_count = len(vert_weights)
+            group_averages.append((group_name, avg_weight, max_weight, vert_count))
+        
+        group_averages.sort(key=lambda x: x[1], reverse=True)
+        
+        context.scene.weight_inspect_results.clear()
+        for group_name, avg_w, max_w, count in group_averages:
+            item = context.scene.weight_inspect_results.add()
+            item.name = group_name
+            item.avg_weight = avg_w
+            item.max_weight = max_w
+            item.vert_count = count
+        
+        context.scene.weight_inspect_vert_count = len(selected_verts)
+        
+        self.report({'INFO'}, f"Found {len(group_averages)} groups on {len(selected_verts)} vertices")
+        return {'FINISHED'}
+
+
+class WPT_OT_RemoveVertexWeight(bpy.types.Operator):
+    """Remove a specific vertex group weight from selected vertices"""
+    bl_idname = "wpt.remove_vertex_weight"
+    bl_label = "Remove Weight"
+    bl_description = "Remove this vertex group's weight from all selected vertices"
+    bl_options = {"REGISTER", "UNDO"}
+    
+    group_name: bpy.props.StringProperty(name="Group Name")
+
+    @classmethod
+    def poll(cls, context):
+        obj = context.active_object
+        return (obj and obj.type == 'MESH' and context.mode == 'PAINT_WEIGHT')
+
+    def execute(self, context):
+        obj = context.active_object
+        
+        vgroup = obj.vertex_groups.get(self.group_name)
+        if not vgroup:
+            self.report({'ERROR'}, f"Vertex group '{self.group_name}' not found")
+            return {'CANCELLED'}
+        
+        selected_indices = [v.index for v in obj.data.vertices if v.select]
+        if not selected_indices:
+            self.report({'WARNING'}, "No vertices selected")
+            return {'CANCELLED'}
+        
+        # Remove weights - need object mode briefly
+        bpy.ops.object.mode_set(mode='OBJECT')
+        vgroup.remove(selected_indices)
+        bpy.ops.object.mode_set(mode='WEIGHT_PAINT')
+        
+        # Re-enable vertex mask (mode switch can reset it)
+        obj.data.use_paint_mask_vertex = True
+        
+        # Refresh the inspection results
+        bpy.ops.wpt.inspect_selected_weights()
+        
+        self.report({'INFO'}, f"Removed '{self.group_name}' from {len(selected_indices)} vertices")
+        return {'FINISHED'}
+
+
+class WPT_OT_SetActiveGroup(bpy.types.Operator):
+    """Set a vertex group as active for painting"""
+    bl_idname = "wpt.set_active_group"
+    bl_label = "Set Active Group"
+    bl_description = "Set this vertex group as the active group for weight painting"
+    bl_options = {"REGISTER", "UNDO"}
+    
+    group_name: bpy.props.StringProperty(name="Group Name")
+
+    @classmethod
+    def poll(cls, context):
+        obj = context.active_object
+        return (obj and obj.type == 'MESH')
+
+    def execute(self, context):
+        obj = context.active_object
+        vgroup = obj.vertex_groups.get(self.group_name)
+        if not vgroup:
+            self.report({'ERROR'}, f"Vertex group '{self.group_name}' not found")
+            return {'CANCELLED'}
+        obj.vertex_groups.active_index = vgroup.index
+        self.report({'INFO'}, f"Active group: '{self.group_name}'")
+        return {'FINISHED'}
+
+
+class WPT_OT_ClearInspection(bpy.types.Operator):
+    """Clear inspection results"""
+    bl_idname = "wpt.clear_inspection"
+    bl_label = "Clear"
+    bl_description = "Clear the inspection results and disable vertex selection"
+    bl_options = {"REGISTER", "UNDO"}
+
+    @classmethod
+    def poll(cls, context):
+        return context.active_object and context.active_object.type == 'MESH'
+
+    def execute(self, context):
+        context.scene.weight_inspect_results.clear()
+        context.scene.weight_inspect_vert_count = 0
+        obj = context.active_object
+        if obj and context.mode == 'PAINT_WEIGHT':
+            obj.data.use_paint_mask_vertex = False
+        self.report({'INFO'}, "Inspection cleared")
+        return {'FINISHED'}
+
+
+class WeightInspectResult(bpy.types.PropertyGroup):
+    """Property group for storing weight inspection results"""
+    name: StringProperty(name="Group Name")
+    avg_weight: FloatProperty(name="Average Weight")
+    max_weight: FloatProperty(name="Max Weight")
+    vert_count: IntProperty(name="Vertex Count")
+
+
 class WPT_PT_MainPanel(bpy.types.Panel):
     """Main weight paint tools panel"""
     bl_label = 'Weight Paint Tools'
@@ -1793,6 +2108,80 @@ class WPT_PT_DisplayOptions(bpy.types.Panel):
         armature = get_active_armature(context)
         if armature:
             layout.prop(armature, 'show_in_front', text="Show Bones In Front")
+
+
+class WPT_PT_WeightInspector(bpy.types.Panel):
+    """Weight Inspector sub-panel for diagnosing weight issues"""
+    bl_label = 'Weight Inspector'
+    bl_idname = 'WPT_PT_weight_inspector'
+    bl_space_type = 'VIEW_3D'
+    bl_region_type = 'UI'
+    bl_category = 'Weight Paint'
+    bl_parent_id = 'WPT_PT_main_panel'
+    bl_order = 5
+
+    @classmethod
+    def poll(cls, context):
+        obj = context.active_object
+        if not obj or obj.type != 'MESH':
+            return False
+        return context.mode == 'PAINT_WEIGHT'
+
+    def draw(self, context):
+        layout = self.layout
+        obj = context.active_object
+        
+        # Step 1: Enable vertex selection
+        is_vertex_select = obj.data.use_paint_mask_vertex
+        
+        if not is_vertex_select:
+            layout.operator("wpt.enable_vertex_select", icon='VERTEXSEL', text="① Enable Vertex Select")
+            layout.label(text="Enable to select vertices for inspection.", icon='INFO')
+        else:
+            # Vertex select is on — show workflow
+            layout.label(text="② Select vertices, then:", icon='HAND')
+            
+            row = layout.row(align=True)
+            row.scale_y = 1.3
+            row.operator("wpt.inspect_selected_weights", icon='VIEWZOOM', text="Inspect Selected")
+            row.operator("wpt.clear_inspection", icon='X', text="")
+        
+        # Show results if available
+        results = context.scene.weight_inspect_results
+        if results:
+            vert_count = context.scene.weight_inspect_vert_count
+            
+            box = layout.box()
+            box.label(text=f"③ {vert_count} vertex(es) — {len(results)} groups:", icon='GROUP_VERTEX')
+            
+            # List all groups sorted by weight
+            for result in results:
+                sub_box = box.box()
+                
+                # Color indicator based on weight
+                if result.avg_weight > 0.5:
+                    icon = 'COLORSET_01_VEC'  # Red - high influence
+                elif result.avg_weight > 0.1:
+                    icon = 'COLORSET_09_VEC'  # Yellow - medium
+                else:
+                    icon = 'COLORSET_04_VEC'  # Green - low
+                
+                # Group name row
+                row = sub_box.row(align=True)
+                row.label(text=f"{result.name}", icon=icon)
+                
+                # Weight info
+                info_row = sub_box.row(align=True)
+                info_row.label(text=f"Avg: {result.avg_weight:.4f}")
+                info_row.label(text=f"Max: {result.max_weight:.4f}")
+                info_row.label(text=f"Verts: {result.vert_count}")
+                
+                # Action buttons
+                action_row = sub_box.row(align=True)
+                op = action_row.operator("wpt.set_active_group", text="Paint", icon='BRUSH_DATA')
+                op.group_name = result.name
+                op = action_row.operator("wpt.remove_vertex_weight", text="Remove", icon='TRASH')
+                op.group_name = result.name
 
 
 # ===== POSE SLIDER FUNCTIONALITY =====
@@ -2442,10 +2831,19 @@ classes = [
     WPT_OT_AddMirror,
     WPT_OT_FloodSmooth,
     WPT_MT_BrushPieMenu,
+    # Weight Inspector classes
+    WeightInspectResult,
+    WPT_OT_EnableVertexSelect,
+    WPT_OT_InspectSelectedWeights,
+    WPT_OT_RemoveVertexWeight,
+    WPT_OT_SetActiveGroup,
+    WPT_OT_ClearInspection,
+    # Panels
     WPT_PT_MainPanel,
     WPT_PT_PaintTools,
     WPT_PT_BoneTools,
     WPT_PT_DisplayOptions,
+    WPT_PT_WeightInspector,
     # Pose Slider classes
     PoseData,
     BoneCollectionPreset,
@@ -2482,6 +2880,10 @@ def register():
     # Register bone collection preset properties
     bpy.types.Scene.bone_collection_props = bpy.props.PointerProperty(type=BoneCollectionProperties)
     bpy.types.Scene.bone_collection_presets = bpy.props.CollectionProperty(type=BoneCollectionPreset)
+    
+    # Register weight inspector properties
+    bpy.types.Scene.weight_inspect_results = bpy.props.CollectionProperty(type=WeightInspectResult)
+    bpy.types.Scene.weight_inspect_vert_count = bpy.props.IntProperty(name="Inspected Vertex Count", default=0)
 
 def unregister():
     global _icons
@@ -2495,6 +2897,10 @@ def unregister():
     # Unregister bone collection preset properties
     del bpy.types.Scene.bone_collection_props
     del bpy.types.Scene.bone_collection_presets
+    
+    # Unregister weight inspector properties
+    del bpy.types.Scene.weight_inspect_results
+    del bpy.types.Scene.weight_inspect_vert_count
     
     # Unregister keymap
     unregister_keymaps()

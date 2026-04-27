@@ -1,4 +1,4 @@
-# My Simp v2.8.1
+# My Simp v2.8.2
 
 **My Simp** is a Blender add-on focused on **streamlining weight painting and rigging workflows**.  
 It provides **compact, one-click tools**, keyboard shortcuts, and smart visibility controls so artists can work faster **without constantly switching modes, tools, or UI panels**.
